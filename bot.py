@@ -21,10 +21,14 @@ SYSTEM_PROMPT = (
     "Отвечай глубоко, точно и остроумно на русском языке. Если просят придумать мем, делай его смешным и актуальным."
 )
 
-# Простой и стабильный запрос к бесплатному Pollinations без ключей
+# Безопасное кодирование текста (убирает сломанные символы и эмодзи)
+def safe_encode(text: str) -> str:
+    clean_text = text.encode("utf-8", "ignore").decode("utf-8")
+    return urllib.parse.quote(clean_text, safe="")
+
 async def ask_ai(prompt: str, system: str = SYSTEM_PROMPT) -> str:
     full_prompt = f"{system}\n\nЗапрос пользователя: {prompt}"
-    encoded = urllib.parse.quote(full_prompt)
+    encoded = safe_encode(full_prompt)
     url = f"https://pollinations.ai{encoded}?model=openai"
     try:
         async with aiohttp.ClientSession() as session:
@@ -54,7 +58,7 @@ async def cmd_img(message: Message):
     
     wait_msg = await message.answer("🎨 Рисую картинку (10–20 секунд)...")
     try:
-        encoded = urllib.parse.quote(prompt)
+        encoded = safe_encode(prompt)
         url = f"https://pollinations.ai{encoded}?width=1024&height=1024&model=flux&nologo=true"
 
         async with aiohttp.ClientSession() as session:
