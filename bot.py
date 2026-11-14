@@ -3,6 +3,7 @@ import base64
 import os
 import urllib.parse
 import aiohttp
+from aiohttp import web
 from io import BytesIO
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
@@ -152,7 +153,18 @@ async def handle_text(message: Message):
     ])
     await message.answer(answer)
 
+# Мини-сервер, чтобы бесплатный Render не отключал бота из-за порта
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 async def main():
+    await start_web_server()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
