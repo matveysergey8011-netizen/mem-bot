@@ -13,6 +13,7 @@ from pptx import Presentation
 from docx import Document
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
+POLLINATIONS_KEY = os.getenv("POLLINATIONS_KEY", "").strip()
 
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
@@ -27,11 +28,13 @@ SYSTEM_PROMPT = (
 async def ask_ai(messages: list, model: str = "openai") -> str:
     payload = json.dumps({
         "model": model,
-        "messages": messages,
-        "private": True
+        "messages": messages
     }, ensure_ascii=False).encode("utf-8")
     
-    headers = {"Content-Type": "application/json; charset=utf-8"}
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {POLLINATIONS_KEY}"
+    }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -42,14 +45,9 @@ async def ask_ai(messages: list, model: str = "openai") -> str:
             ) as resp:
                 raw_text = await resp.text(encoding="utf-8", errors="ignore")
                 if resp.status == 200:
-                    try:
-                        data = json.loads(raw_text)
-                        if isinstance(data, dict) and "choices" in data:
-                            return data["choices"][0]["message"]["content"]
-                    except Exception:
-                        pass
-                    return raw_text.strip()
-                return f"Сервер сейчас занят (код {resp.status}). Попробуй повторить запрос через 10 секунд."
+                    data = json.loads(raw_text)
+                    return data["choices"][0]["message"]["content"].strip()
+                return f"Сервер вернул код {resp.status}. Ответ: {raw_text[:150]}"
     except Exception as e:
         return f"Не удалось получить ответ от сервера ({type(e).__name__}). Попробуй еще раз."
 
@@ -79,7 +77,7 @@ async def cmd_img(message: Message):
         }])
         ascii_prompt = en_prompt.encode("ascii", "ignore").decode("ascii").strip() or "realistic scenic art"
         encoded = urllib.parse.quote(ascii_prompt)
-        url = f"https://pollinations.ai{encoded}?width=1024&height=1024&model=flux&nologo=true"
+        url = f"https://pollinations.ai{encoded}?model=flux&width=1024&height=1024&key={POLLINATIONS_KEY}"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=60) as resp:
@@ -88,7 +86,8 @@ async def cmd_img(message: Message):
                     photo = BufferedInputFile(img_data, filename="image.jpg")
                     await message.answer_photo(photo, caption=f"Готово по запросу: {prompt}")
                 else:
-                    await message.answer(f"Сервер генерации сейчас занят (код {resp.status}). Попробуй через минуту.")
+                    err_text = await resp.text(encoding="utf-8", errors="ignore")
+                    await message.answer(f"Ошибка генерации (код {resp.status}): {err_text[:150]}")
     except Exception as e:
         await message.answer(f"Не удалось создать изображение ({type(e).__name__}). Попробуй еще раз.")
     finally:
