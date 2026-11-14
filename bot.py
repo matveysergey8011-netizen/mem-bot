@@ -27,7 +27,8 @@ SYSTEM_PROMPT = (
 async def ask_ai(messages: list, model: str = "openai") -> str:
     payload = json.dumps({
         "model": model,
-        "messages": messages
+        "messages": messages,
+        "private": True
     }, ensure_ascii=False).encode("utf-8")
     
     headers = {"Content-Type": "application/json; charset=utf-8"}
@@ -43,9 +44,11 @@ async def ask_ai(messages: list, model: str = "openai") -> str:
                 if resp.status == 200:
                     try:
                         data = json.loads(raw_text)
-                        return data["choices"][0]["message"]["content"]
+                        if isinstance(data, dict) and "choices" in data:
+                            return data["choices"][0]["message"]["content"]
                     except Exception:
-                        return raw_text
+                        pass
+                    return raw_text.strip()
                 return f"Сервер сейчас занят (код {resp.status}). Попробуй повторить запрос через 10 секунд."
     except Exception as e:
         return f"Не удалось получить ответ от сервера ({type(e).__name__}). Попробуй еще раз."
