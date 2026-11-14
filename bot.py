@@ -26,30 +26,31 @@ SYSTEM_PROMPT = (
 )
 
 async def ask_ai(messages: list, model: str = "openai") -> str:
-    payload = json.dumps({
+    payload = {
         "model": model,
         "messages": messages
-    }, ensure_ascii=False).encode("utf-8")
-    
+    }
     headers = {
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
         "Authorization": f"Bearer {POLLINATIONS_KEY}"
     }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://pollinations.ai",
-                data=payload,
+                json=payload,
                 headers=headers,
+                allow_redirects=False,
                 timeout=60
             ) as resp:
                 raw_text = await resp.text(encoding="utf-8", errors="ignore")
                 if resp.status == 200:
                     data = json.loads(raw_text)
-                    return data["choices"][0]["message"]["content"].strip()
-                return f"Сервер вернул код {resp.status}. Ответ: {raw_text[:150]}"
+                    return data["choices"]["message"]["content"].strip()
+                return f"Код {resp.status}. Детали: {raw_text[:200]}"
     except Exception as e:
-        return f"Не удалось получить ответ от сервера ({type(e).__name__}). Попробуй еще раз."
+        return f"Ошибка соединения ({type(e).__name__}). Попробуй еще раз."
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -112,9 +113,9 @@ async def cmd_pptx(message: Message):
         for slide_raw in text.split("==="):
             if "|" in slide_raw:
                 title, body = slide_raw.split("|", 1)
-                slide = prs.slides.add_slide(prs.slide_layouts[1])
+                slide = prs.slides.add_slide(prs.slide_layouts)
                 slide.shapes.title.text = title.strip()
-                slide.placeholders[1].text = body.strip()
+                slide.placeholders.text = body.strip()
 
         buf = BytesIO()
         prs.save(buf)
