@@ -16,24 +16,24 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
 
-TEXT_API_URL = "https://pollinations.ai"
-
 SYSTEM_PROMPT = (
     "Ты — сверхинтеллектуальный ИИ-помощник и мастер юмора в Telegram. "
     "Отвечай глубоко, точно и остроумно на русском языке. Если просят придумать мем, делай его смешным и актуальным."
 )
 
-async def ask_ai(messages: list, model: str = "openai-large") -> str:
-    payload = {
-        "model": model,
-        "messages": messages
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(TEXT_API_URL, json=payload, timeout=60) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return data["choices"][0]["message"]["content"]
-            return "Сервер ИИ временно перегружен, попробуй повторить запрос через минуту."
+# Простой и стабильный запрос к бесплатному Pollinations без ключей
+async def ask_ai(prompt: str, system: str = SYSTEM_PROMPT) -> str:
+    full_prompt = f"{system}\n\nЗапрос пользователя: {prompt}"
+    encoded = urllib.parse.quote(full_prompt)
+    url = f"https://pollinations.ai{encoded}?model=openai"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=45) as resp:
+                if resp.status == 200:
+                    return await resp.text()
+                return f"Сервер ответил кодом {resp.status}. Попробуй еще раз через 10 секунд."
+    except Exception as e:
+        return f"Не успел дождаться ответа от сервера: {type(e).__name__}"
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -52,24 +52,23 @@ async def cmd_img(message: Message):
     if not prompt:
         return await message.answer("Напиши запрос после команды. Пример: /img кот программист в киберпанке")
     
-    wait_msg = await message.answer("🎨 Рисую картинку...")
-    en_prompt = await ask_ai([{
-        "role": "user",
-        "content": f"Переведи этот запрос для генератора изображений на английский и улучши детализацию. Верни ТОЛЬКО английский текст: {prompt}"
-    }])
+    wait_msg = await message.answer("🎨 Рисую картинку (10–20 секунд)...")
+    try:
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://pollinations.ai{encoded}?width=1024&height=1024&model=flux&nologo=true"
 
-    encoded = urllib.parse.quote(en_prompt.strip())
-    url = f"https://pollinations.ai{encoded}?width=1024&height=1024&model=flux&nologo=true"
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=60) as resp:
-            if resp.status == 200:
-                img_data = await resp.read()
-                photo = BufferedInputFile(img_data, filename="art.jpg")
-                await message.answer_photo(photo, caption=f"✨ Готово по запросу: {prompt}")
-            else:
-                await message.answer("Сервер генерации сейчас занят, попробуй через минуту.")
-    await wait_msg.delete()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=50) as resp:
+                if resp.status == 200:
+                    img_data = await resp.read()
+                    photo = BufferedInputFile(img_data, filename="art.jpg")
+                    await message.answer_photo(photo, caption=f"✨ Готово по запросу: {prompt}")
+                else:
+                    await message.answer(f"Сервер рисования занят (код {resp.status}). Попробуй через минуту.")
+    except Exception as e:
+        await message.answer(f"Ошибка при рисовании: {type(e).__name__}. Попробуй еще раз!")
+    finally:
+        await wait_msg.delete()
 
 @dp.message(Command("pptx"))
 async def cmd_pptx(message: Message):
@@ -78,27 +77,31 @@ async def cmd_pptx(message: Message):
         return await message.answer("Укажи тему. Пример: /pptx История мемов")
     
     wait_msg = await message.answer("📊 Собираю презентацию...")
-    prompt = (
-        f"Составь структуру презентации на 5 слайдов по теме: '{topic}'. "
-        "Формат строго такой (разделяй слайды символом ===):\n"
-        "Заголовок слайда | Текст слайда (3-4 коротких пункта)\n===\n"
-    )
-    text = await ask_ai([{"role": "user", "content": prompt}])
+    try:
+        prompt = (
+            f"Составь структуру презентации на 5 слайдов по теме: '{topic}'. "
+            "Формат строго такой (разделяй слайды символом ===):\n"
+            "Заголовок слайда | Текст слайда (3-4 коротких пункта)\n===\n"
+        )
+        text = await ask_ai(prompt, system="Ты генератор презентаций.")
 
-    prs = Presentation()
-    for slide_raw in text.split("==="):
-        if "|" in slide_raw:
-            title, body = slide_raw.split("|", 1)
-            slide = prs.slides.add_slide(prs.slide_layouts[1])
-            slide.shapes.title.text = title.strip()
-            slide.placeholders[1].text = body.strip()
+        prs = Presentation()
+        for slide_raw in text.split("==="):
+            if "|" in slide_raw:
+                title, body = slide_raw.split("|", 1)
+                slide = prs.slides.add_slide(prs.slide_layouts[1])
+                slide.shapes.title.text = title.strip()
+                slide.placeholders[1].text = body.strip()
 
-    buf = BytesIO()
-    prs.save(buf)
-    buf.seek(0)
-    doc_file = BufferedInputFile(buf.read(), filename="presentation.pptx")
-    await message.answer_document(doc_file, caption=f"📊 Презентация на тему «{topic}» готова!")
-    await wait_msg.delete()
+        buf = BytesIO()
+        prs.save(buf)
+        buf.seek(0)
+        doc_file = BufferedInputFile(buf.read(), filename="presentation.pptx")
+        await message.answer_document(doc_file, caption=f"📊 Презентация на тему «{topic}» готова!")
+    except Exception:
+        await message.answer("Не получилось собрать слайды, попробуй еще раз.")
+    finally:
+        await wait_msg.delete()
 
 @dp.message(Command("docx"))
 async def cmd_docx(message: Message):
@@ -107,53 +110,65 @@ async def cmd_docx(message: Message):
         return await message.answer("Укажи тему. Пример: /docx План запуска стартапа")
     
     wait_msg = await message.answer("📄 Пишу документ...")
-    text = await ask_ai([{
-        "role": "user",
-        "content": f"Напиши подробный, хорошо структурированный документ на тему: {topic}. Без markdown-звездочек."
-    }])
+    try:
+        text = await ask_ai(
+            f"Напиши подробный, хорошо структурированный документ на тему: {topic}. Без markdown-звездочек.",
+            system="Ты профессиональный автор документов."
+        )
 
-    doc = Document()
-    doc.add_heading(topic, 0)
-    for para in text.split("\n"):
-        if para.strip():
-            doc.add_paragraph(para.strip())
+        doc = Document()
+        doc.add_heading(topic, 0)
+        for para in text.split("\n"):
+            if para.strip():
+                doc.add_paragraph(para.strip())
 
-    buf = BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    doc_file = BufferedInputFile(buf.read(), filename="document.docx")
-    await message.answer_document(doc_file, caption=f"📄 Документ «{topic}» готов!")
-    await wait_msg.delete()
+        buf = BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        doc_file = BufferedInputFile(buf.read(), filename="document.docx")
+        await message.answer_document(doc_file, caption=f"📄 Документ «{topic}» готов!")
+    except Exception:
+        await message.answer("Ошибка при создании файла, попробуй еще раз.")
+    finally:
+        await wait_msg.delete()
 
 @dp.message(F.photo)
 async def handle_photo(message: Message):
     wait_msg = await message.answer("👁 Изучаю изображение...")
-    photo = message.photo[-1]
-    file_info = await bot.get_file(photo.file_id)
-    file_bytes = await bot.download_file(file_info.file_path)
-    b64_img = base64.b64encode(file_bytes.read()).decode("utf-8")
-    
-    caption = message.caption or "Подробно опиши, что на этом фото, и придумай смешную подпись для мема."
-    
-    answer = await ask_ai([{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": caption},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
-        ]
-    }], model="openai")
-    await message.answer(answer)
-    await wait_msg.delete()
+    try:
+        photo = message.photo[-1]
+        file_info = await bot.get_file(photo.file_id)
+        file_bytes = await bot.download_file(file_info.file_path)
+        b64_img = base64.b64encode(file_bytes.read()).decode("utf-8")
+        
+        caption = message.caption or "Подробно опиши, что на этом фото, и придумай смешную подпись для мема."
+        payload = {
+            "model": "openai",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": caption},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                ]
+            }]
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://pollinations.aiopenai", json=payload, timeout=45) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    await message.answer(data["choices"][0]["message"]["content"])
+                else:
+                    await message.answer(f"Сервер анализа фото вернул код {resp.status}.")
+    except Exception:
+        await message.answer("Не удалось изучить картинку, попробуй отправить её еще раз.")
+    finally:
+        await wait_msg.delete()
 
 @dp.message(F.text)
 async def handle_text(message: Message):
-    answer = await ask_ai([
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": message.text}
-    ])
+    answer = await ask_ai(message.text)
     await message.answer(answer)
 
-# Мини-сервер, чтобы бесплатный Render не отключал бота из-за порта
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
